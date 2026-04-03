@@ -8,7 +8,7 @@ from importlib.resources import files
 
 import anthropic
 
-from . import analyzer, detector, generator, git_utils, readme_utils
+from . import analyzer, detector, generator, git_utils, gitlab_configurator, hook_installer, readme_utils
 from .local_client import LocalClaudeClient
 
 logging.basicConfig(
@@ -29,37 +29,95 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Automatic README documentation bot for Odoo custom modules",
     )
     sub = parser.add_subparsers(dest="command")
-    run_parser = sub.add_parser("run", help="Run the documentation pipeline")
-    run_parser.add_argument(
+
+    # --- run ---
+    run_p = sub.add_parser("run", help="Run the documentation pipeline")
+    run_p.add_argument(
         "--dry-run",
         action="store_true",
         help="Analyze only — no file writes, no git operations",
     )
-    run_parser.add_argument(
+    run_p.add_argument(
         "--force",
         action="store_true",
         help="Skip SHA check and regenerate all module READMEs",
     )
-    run_parser.add_argument(
+    run_p.add_argument(
         "--module",
         metavar="PATH",
         help="Only process this specific module path",
     )
+
+    # --- install ---
+    install_p = sub.add_parser(
+        "install",
+        help="Install a post-commit git hook that offers to regenerate READMEs after each commit",
+    )
+    install_p.add_argument(
+        "--repo",
+        metavar="PATH",
+        default=".",
+        help="Path to the git repository (default: current directory)",
+    )
+    install_p.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="Remove the hook instead of installing it",
+    )
+
+    # --- configure-gitlab ---
+    gl_p = sub.add_parser(
+        "configure-gitlab",
+        help="Create the Pipeline Schedule in a GitLab project via the API",
+    )
+    gl_p.add_argument(
+        "--project",
+        metavar="GROUP/REPO",
+        required=True,
+        help="GitLab project path, e.g. Jarsa/starka",
+    )
+    gl_p.add_argument(
+        "--branch",
+        metavar="BRANCH",
+        default="main",
+        help="Branch to schedule on (default: main)",
+    )
+    gl_p.add_argument(
+        "--host",
+        metavar="HOST",
+        default=None,
+        help="GitLab host (default: CI_SERVER_HOST env var or gitlab.com)",
+    )
+    gl_p.add_argument(
+        "--token",
+        metavar="TOKEN",
+        default=None,
+        help="GitLab personal access token (default: GITLAB_TOKEN env var)",
+    )
+    gl_p.add_argument(
+        "--cron",
+        metavar="CRON",
+        default="0 12 * * 1-5",
+        help="Cron expression in UTC (default: '0 12 * * 1-5' = Mon–Fri 6 am Torreón)",
+    )
+    gl_p.add_argument(
+        "--timezone",
+        metavar="TZ",
+        default="America/Monterrey",
+        help="Cron timezone (default: America/Monterrey)",
+    )
+    gl_p.add_argument(
+        "--force",
+        action="store_true",
+        help="Delete and recreate the schedule if it already exists",
+    )
+
     return parser
 
 
-def main() -> None:  # noqa: C901
+def _cmd_run(args: argparse.Namespace) -> None:  # noqa: C901
     """Orchestrate the full documentation pipeline."""
-    parser = _build_parser()
-    args = parser.parse_args()
-
-    if args.command != "run":
-        parser.print_help()
-        sys.exit(0)
-
-    # --- Environment variables ---
     api_key = os.environ.get("ANTHROPIC_API_KEY")
-
     gitlab_token = os.environ.get("GITLAB_TOKEN")
     branch = os.environ.get("CI_DEFAULT_BRANCH", "main")
     ci_server_host = os.environ.get("CI_SERVER_HOST", "gitlab.com")
@@ -68,7 +126,6 @@ def main() -> None:  # noqa: C901
     bot_name = os.environ.get("BOT_NAME", "Jarsa Docs Bot")
     bot_email = os.environ.get("BOT_EMAIL", "docs-bot@jarsa.com")
 
-    # --- Git remote configuration for CI ---
     if gitlab_token and ci_project_path:
         git_utils.configure_git(bot_name, bot_email, cwd=repo_root)
         remote_url = (
@@ -89,12 +146,8 @@ def main() -> None:  # noqa: C901
 
     base_prompt = _load_base_prompt()
 
-    # --- Discover modules ---
     if args.module:
-        if args.force or True:
-            # When --module is specified, always attempt; detect handles SHA logic
-            all_candidates = [{"path": args.module, "last_sha": None, "changed_files": []}]
-        modules_to_process = all_candidates
+        modules_to_process = [{"path": args.module, "last_sha": None, "changed_files": []}]
     elif args.force:
         raw = git_utils.get_all_modules(repo_root)
         modules_to_process = [{"path": m, "last_sha": None, "changed_files": []} for m in raw]
@@ -116,7 +169,6 @@ def main() -> None:  # noqa: C901
         last_sha = module["last_sha"]
         print(f"\n→ {module_path} (último SHA documentado: {last_sha or 'nunca'})")
 
-        # Read diff and README preview for Haiku
         diff = git_utils.get_diff_since(last_sha or current_sha, module_path) if last_sha else ""
         readme_path = os.path.join(module_path, "README.md")
         readme_preview = ""
@@ -124,7 +176,6 @@ def main() -> None:  # noqa: C901
             with open(readme_path, "r", encoding="utf-8") as fh:
                 readme_preview = fh.read()
 
-        # --- Haiku analysis (skip if --force or never documented) ---
         if not args.force and last_sha:
             analysis = analyzer.should_update(client, diff, readme_preview)
             print(f"  Análisis: {analysis['reason']}")
@@ -139,7 +190,6 @@ def main() -> None:  # noqa: C901
             updated.append(module_path)
             continue
 
-        # --- Sonnet generation ---
         print("  Generando README con Claude Sonnet…")
         try:
             content = generator.generate_readme(client, module_path, base_prompt)
@@ -151,7 +201,6 @@ def main() -> None:  # noqa: C901
         print(f"  ✓ README actualizado ({len(content)} caracteres)")
         updated.append(module_path)
 
-    # --- Summary ---
     print(f"\nResumen: {len(updated)} README(s) actualizados.")
     for m in updated:
         print(f"  - {m}")
@@ -163,7 +212,6 @@ def main() -> None:  # noqa: C901
         print("[dry-run] No se realizaron cambios en el repositorio.")
         sys.exit(42)
 
-    # --- Commit and push ---
     if gitlab_token:
         try:
             git_utils.commit_and_push(branch, updated, sha_short, cwd=repo_root)
@@ -174,3 +222,73 @@ def main() -> None:  # noqa: C901
         print("GITLAB_TOKEN no configurado — omitiendo commit/push.")
 
     sys.exit(42)
+
+
+def _cmd_install(args: argparse.Namespace) -> None:
+    """Install or uninstall the post-commit git hook."""
+    repo = os.path.abspath(args.repo)
+    if args.uninstall:
+        hook_installer.uninstall(repo)
+        print(f"Hook desinstalado de {repo}")
+    else:
+        try:
+            hook_installer.install(repo)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
+        if hook_installer.is_installed(repo):
+            print(f"✓ Hook post-commit instalado en {repo}")
+            print("  Después de cada commit se te preguntará si quieres regenerar los READMEs.")
+        else:
+            print("El hook ya estaba instalado.")
+
+
+def _cmd_configure_gitlab(args: argparse.Namespace) -> None:
+    """Create the Pipeline Schedule in GitLab via the API."""
+    token = args.token or os.environ.get("GITLAB_TOKEN")
+    if not token:
+        print(
+            "Error: se requiere --token o la variable de entorno GITLAB_TOKEN.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    host = args.host or os.environ.get("CI_SERVER_HOST", "gitlab.com")
+
+    print(f"Configurando schedule en {host} / {args.project}…")
+    try:
+        schedule = gitlab_configurator.configure_schedule(
+            host=host,
+            token=token,
+            project_path=args.project,
+            branch=args.branch,
+            cron=args.cron,
+            timezone=args.timezone,
+            force=args.force,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Error al configurar GitLab: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"✓ Pipeline Schedule configurado:")
+    print(f"  ID:          {schedule['id']}")
+    print(f"  Descripción: {schedule['description']}")
+    print(f"  Rama:        {schedule['ref']}")
+    print(f"  Cron:        {schedule['cron']} ({schedule['cron_timezone']})")
+    print(f"  Activo:      {schedule['active']}")
+
+
+def main() -> None:
+    """Main entry point — dispatch to the appropriate subcommand."""
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    if args.command == "run":
+        _cmd_run(args)
+    elif args.command == "install":
+        _cmd_install(args)
+    elif args.command == "configure-gitlab":
+        _cmd_configure_gitlab(args)
+    else:
+        parser.print_help()
+        sys.exit(0)
