@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "odoo-readme-bot"
+dynamic = ["version"]
+description = "Automatic README documentation bot for Odoo custom modules"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Jarsa", email = "dev@jarsa.com" }]
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.30.0",
+    "gitpython>=3.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "ruff",
+]
+
+[project.scripts]
+odoo-readme-bot = "odoo_readme_bot.cli:main"
+
+[tool.hatch.version]
+path = "odoo_readme_bot/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["odoo_readme_bot"]
+include = ["odoo_readme_bot/prompt.md"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

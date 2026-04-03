@@ -1,0 +1,43 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff -q
+      - run: ruff check odoo_readme_bot/
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]" -q
+      - run: pytest tests/ --cov=odoo_readme_bot --cov-report=term-missing
+
+  publish:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install build -q
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        # No token needed — OIDC handles authentication automatically
