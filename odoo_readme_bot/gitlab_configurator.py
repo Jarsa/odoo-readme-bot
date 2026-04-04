@@ -5,6 +5,7 @@ No extra dependencies — uses only urllib from the standard library.
 
 import json
 import logging
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -30,8 +31,17 @@ def _api_request(
         "Content-Type": "application/json",
     }
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req) as resp:
-        return json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="replace")
+        try:
+            detail = json.loads(body)
+            msg = detail.get("error_description") or detail.get("message") or body
+        except json.JSONDecodeError:
+            msg = body
+        raise RuntimeError(f"GitLab API {exc.code} {exc.reason}: {msg}") from None
 
 
 def _project_id(host: str, token: str, project_path: str) -> int:

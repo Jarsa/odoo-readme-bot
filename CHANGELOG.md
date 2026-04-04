@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1] - 2026-04-04
+
+### Fixed
+
+- `configure-gitlab`: HTTP errors now show the GitLab API message body
+  (e.g. "Token is expired...") instead of the generic `HTTP Error 401: Unauthorized`.
+
 ## [1.1.0] - 2026-04-03
 
 ### Added
