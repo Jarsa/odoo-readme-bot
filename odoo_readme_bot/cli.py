@@ -12,10 +12,12 @@ from . import (
     __version__,
     analyzer,
     detector,
+    docs_sync,
     generator,
     git_utils,
     gitlab_configurator,
     hook_installer,
+    odoo_client,
     readme_utils,
 )
 from .local_client import LocalClaudeClient
@@ -122,6 +124,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="Delete and recreate the schedule if it already exists",
+    )
+
+    # --- sync-notebooklm ---
+    sync_p = sub.add_parser(
+        "sync-notebooklm",
+        help="Sync installed module READMEs to a Google Doc (NotebookLM source)",
+    )
+    sync_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the combined document to stdout without writing to Google Docs",
     )
 
     return parser
@@ -304,6 +317,61 @@ def _cmd_install(args: argparse.Namespace) -> None:
             print("El hook ya estaba instalado.")
 
 
+def _cmd_sync_notebooklm(args: argparse.Namespace) -> None:
+    """Sync installed module READMEs to a Google Doc."""
+    odoo_url = os.environ.get("ODOO_URL")
+    if not odoo_url:
+        print("Error: se requiere la variable de entorno ODOO_URL.", file=sys.stderr)
+        sys.exit(1)
+
+    google_sa_credentials = os.environ.get("GOOGLE_SA_CREDENTIALS")
+    if not google_sa_credentials:
+        print(
+            "Error: se requiere la variable de entorno GOOGLE_SA_CREDENTIALS.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    google_docs_id = os.environ.get("GOOGLE_DOCS_ID")
+    if not google_docs_id:
+        print("Error: se requiere la variable de entorno GOOGLE_DOCS_ID.", file=sys.stderr)
+        sys.exit(1)
+
+    client_name = os.environ.get("CUSTOMER")
+    if not client_name:
+        print("Error: se requiere la variable de entorno CUSTOMER.", file=sys.stderr)
+        sys.exit(1)
+
+    # REPOS_ROOT: directorio raíz con TODOS los repos clonados (starka-sh con submódulos).
+    # En CI se setea al directorio clonado de GITHUB_REPO.
+    # Si no está presente, cae en CI_PROJECT_DIR (sólo el repo actual).
+    repos_root = os.environ.get("REPOS_ROOT") or os.environ.get("CI_PROJECT_DIR", ".")
+    print(f"Buscando READMEs en: {os.path.abspath(repos_root)}")
+
+    print(f"Consultando módulos instalados en {odoo_url}…")
+    module_names = odoo_client.get_installed_custom_modules(odoo_url)
+    if not module_names:
+        print("Advertencia: webhook de Odoo no disponible — usando módulos del repositorio.")
+        module_names = [
+            os.path.basename(p) for p in git_utils.get_all_modules(repos_root)
+        ]
+    if not module_names:
+        print("No se encontraron módulos. Sin cambios.")
+        sys.exit(0)
+
+    print(f"Módulos encontrados: {len(module_names)}")
+    content = docs_sync.build_combined_document(module_names, repos_root, client_name)
+
+    if args.dry_run:
+        print(content)
+        sys.exit(0)
+
+    service = docs_sync.build_service(google_sa_credentials)
+    docs_sync.clear_and_update_doc(service, google_docs_id, content)
+    print(f"✅ Google Doc actualizado: {len(module_names)} módulos incluidos")
+    sys.exit(0)
+
+
 def _cmd_configure_gitlab(args: argparse.Namespace) -> None:
     """Create the Pipeline Schedule in GitLab via the API."""
     token = args.token or os.environ.get("GITLAB_TOKEN")
@@ -352,6 +420,8 @@ def main() -> None:
         _cmd_install(args)
     elif args.command == "configure-gitlab":
         _cmd_configure_gitlab(args)
+    elif args.command == "sync-notebooklm":
+        _cmd_sync_notebooklm(args)
     else:
         parser.print_help()
         sys.exit(0)

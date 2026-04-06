@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1] - 2026-04-06
+
+### Fixed
+
+- Include `odoo_client.py` and `docs_sync.py` in published wheel (files were
+  missing from v1.2.0 due to not being committed before tagging).
+
 ## [1.2.0] - 2026-04-06
 
 ### Added
