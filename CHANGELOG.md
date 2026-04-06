@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.5] - 2026-04-06
+
+### Added
+
+- `version` subcommand: prints the installed version and exits (`odoo-readme-bot version`).
+
 ## [1.1.4] - 2026-04-06
 
 ### Added

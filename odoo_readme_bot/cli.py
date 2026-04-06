@@ -8,7 +8,16 @@ from importlib.resources import files
 
 import anthropic
 
-from . import analyzer, detector, generator, git_utils, gitlab_configurator, hook_installer, readme_utils
+from . import (
+    __version__,
+    analyzer,
+    detector,
+    generator,
+    git_utils,
+    gitlab_configurator,
+    hook_installer,
+    readme_utils,
+)
 from .local_client import LocalClaudeClient
 
 logging.basicConfig(
@@ -29,6 +38,9 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Automatic README documentation bot for Odoo custom modules",
     )
     sub = parser.add_subparsers(dest="command")
+
+    # --- version ---
+    sub.add_parser("version", help="Print the installed version and exit")
 
     # --- run ---
     run_p = sub.add_parser("run", help="Run the documentation pipeline")
@@ -332,7 +344,9 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
-    if args.command == "run":
+    if args.command == "version":
+        print(f"odoo-readme-bot {__version__}")
+    elif args.command == "run":
         _cmd_run(args)
     elif args.command == "install":
         _cmd_install(args)
