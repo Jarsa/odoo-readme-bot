@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.3] - 2026-04-06
+
+### Fixed
+
+- Remove unused `shutil` import in `hook_installer.py` (ruff F401).
+- Remove extraneous `f` prefix on string literal in `cli.py` (ruff F541).
+
 ## [1.1.2] - 2026-04-06
 
 ### Fixed

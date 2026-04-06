@@ -276,7 +276,7 @@ def _cmd_configure_gitlab(args: argparse.Namespace) -> None:
         print(f"Error al configurar GitLab: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"✓ Pipeline Schedule configurado:")
+    print("✓ Pipeline Schedule configurado:")
     print(f"  ID:          {schedule['id']}")
     print(f"  Descripción: {schedule['description']}")
     print(f"  Rama:        {schedule['ref']}")

@@ -2,7 +2,6 @@
 
 import logging
 import os
-import shutil
 import stat
 
 logger = logging.getLogger(__name__)
