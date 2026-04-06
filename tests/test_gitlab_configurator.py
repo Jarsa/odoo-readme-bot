@@ -1,12 +1,9 @@
 """Tests for gitlab_configurator — mock urllib, test schedule creation."""
 
 import json
-from io import BytesIO
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from odoo_readme_bot.gitlab_configurator import configure_schedule
+from odoo_readme_bot.gitlab_configurator import commit_files, configure_schedule, preflight
 
 
 def _mock_response(data: dict, status: int = 200):
@@ -122,3 +119,92 @@ class TestConfigureSchedule:
         body = json.loads(req.data.decode())
         assert body["ref"] == "17.0"
         assert body["cron"] == "0 8 * * 1-5"
+
+
+class TestPreflight:
+    def test_returns_project_id_on_success(self):
+        project = {"id": 42}
+        branch_info = {"name": "17.0"}
+        with _patch_urlopen([project, branch_info]):
+            pid = preflight("git.jarsa.com", "glpat-test", "Jarsa/starka", "17.0")
+        assert pid == 42
+
+    def test_raises_on_invalid_token(self):
+        import pytest
+        import urllib.error
+
+        def raise_401(*args, **kwargs):
+            err = urllib.error.HTTPError(
+                url="", code=401, msg="Unauthorized",
+                hdrs=None, fp=None,
+            )
+            err.read = lambda: b'{"message":"401 Unauthorized"}'
+            raise err
+
+        with patch("odoo_readme_bot.gitlab_configurator.urllib.request.urlopen", side_effect=raise_401):
+            with pytest.raises(RuntimeError, match="401"):
+                preflight("git.jarsa.com", "bad-token", "Jarsa/starka", "17.0")
+
+    def test_raises_on_branch_not_found(self):
+        import pytest
+        import urllib.error
+
+        err_404 = urllib.error.HTTPError(
+            url="", code=404, msg="Not Found", hdrs=None, fp=None,
+        )
+        err_404.read = lambda: b'{"message":"404 Branch Not Found"}'
+
+        with patch(
+            "odoo_readme_bot.gitlab_configurator.urllib.request.urlopen",
+            side_effect=[_mock_response({"id": 42}), err_404],
+        ):
+            with pytest.raises(RuntimeError, match="404"):
+                preflight("git.jarsa.com", "glpat-test", "Jarsa/starka", "nonexistent")
+
+
+class TestCommitFiles:
+    def test_creates_commit_with_correct_actions(self, tmp_path):
+        # Write a fake README file
+        readme = tmp_path / "my_module" / "README.md"
+        readme.parent.mkdir()
+        readme.write_text("# My Module\n")
+
+        # file_exists check returns False (create action)
+        file_not_found = {"message": "404 Not Found"}
+        commit_result = {"id": "abc123def456", "short_id": "abc123de"}
+
+        import urllib.error
+
+        def urlopen_side_effect(req):
+            url = req.full_url
+            if "/repository/files/" in url:
+                err = urllib.error.HTTPError(
+                    url=url, code=404, msg="Not Found", hdrs=None, fp=None,
+                )
+                err.read = lambda: json.dumps(file_not_found).encode()
+                raise err
+            return _mock_response(commit_result)
+
+        with patch(
+            "odoo_readme_bot.gitlab_configurator.urllib.request.urlopen",
+            side_effect=urlopen_side_effect,
+        ) as mock_open:
+            result = commit_files(
+                host="git.jarsa.com",
+                token="glpat-test",
+                project_id=42,
+                branch="17.0",
+                readme_paths=["my_module/README.md"],
+                commit_message="docs: update README",
+                repo_root=str(tmp_path),
+            )
+
+        assert result["short_id"] == "abc123de"
+        # Verify the commit POST body
+        post_call = mock_open.call_args_list[-1]
+        req = post_call.args[0]
+        body = json.loads(req.data.decode())
+        assert body["branch"] == "17.0"
+        assert body["actions"][0]["action"] == "create"
+        assert body["actions"][0]["file_path"] == "my_module/README.md"
+        assert "# My Module" in body["actions"][0]["content"]

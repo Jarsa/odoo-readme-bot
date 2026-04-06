@@ -77,5 +77,5 @@ class TestWriteShaToReadme:
             readme = os.path.join(tmpdir, "README.md")
             with open(readme) as fh:
                 lines = fh.read().splitlines()
-            last_non_empty = [l for l in lines if l.strip()][-1]
+            last_non_empty = [line for line in lines if line.strip()][-1]
             assert "odoo-docs:" in last_non_empty

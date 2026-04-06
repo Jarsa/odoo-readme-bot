@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.1.4] - 2026-04-06
+
+### Added
+
+- **Preflight check**: before generating any README, `run` now verifies
+  GitLab API credentials and branch existence. If invalid, exits with error
+  immediately — no tokens wasted.
+- **GitLab API commits**: READMEs are now pushed via the GitLab Commits API
+  instead of `git push`, which works even when HTTP git access is disabled
+  on the server (only SSH allowed). Falls back to `git push` when
+  `CI_PROJECT_PATH` is not set (local runs).
+
+### Fixed
+
+- Removed unused imports in tests (ruff F401, F821, E741).
+
 ## [1.1.3] - 2026-04-06
 
 ### Fixed

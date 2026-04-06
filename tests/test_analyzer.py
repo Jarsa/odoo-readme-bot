@@ -3,8 +3,6 @@
 import json
 from unittest.mock import MagicMock
 
-import pytest
-
 from odoo_readme_bot.analyzer import should_update
 
 

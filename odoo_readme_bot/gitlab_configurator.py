@@ -1,10 +1,11 @@
-"""Configure GitLab pipeline schedules via the GitLab REST API.
+"""Configure GitLab pipeline schedules and commit files via the GitLab REST API.
 
 No extra dependencies — uses only urllib from the standard library.
 """
 
 import json
 import logging
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,12 +36,12 @@ def _api_request(
         with urllib.request.urlopen(req) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode(errors="replace")
+        raw = exc.read().decode(errors="replace")
         try:
-            detail = json.loads(body)
-            msg = detail.get("error_description") or detail.get("message") or body
+            detail = json.loads(raw)
+            msg = detail.get("error_description") or detail.get("message") or raw
         except json.JSONDecodeError:
-            msg = body
+            msg = raw
         raise RuntimeError(f"GitLab API {exc.code} {exc.reason}: {msg}") from None
 
 
@@ -55,6 +56,93 @@ def _list_schedules(host: str, token: str, project_id: int) -> list[dict]:
     """Return all existing pipeline schedules for the project."""
     return _api_request(host, token, "GET", f"/projects/{project_id}/pipeline_schedules")
 
+
+def _file_exists(host: str, token: str, project_id: int, branch: str, file_path: str) -> bool:
+    """Return True if file_path exists in the repo at the given branch."""
+    encoded_file = urllib.parse.quote(file_path, safe="")
+    encoded_branch = urllib.parse.quote(branch, safe="")
+    try:
+        _api_request(
+            host, token, "GET",
+            f"/projects/{project_id}/repository/files/{encoded_file}?ref={encoded_branch}",
+        )
+        return True
+    except RuntimeError:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Preflight
+# ---------------------------------------------------------------------------
+
+def preflight(host: str, token: str, project_path: str, branch: str) -> int:
+    """Verify API credentials and branch existence before generating READMEs.
+
+    Returns the numeric project ID on success.
+    Raises RuntimeError with a descriptive message on any failure.
+    """
+    logger.info("Preflight: verificando acceso a %s / %s (rama: %s)", host, project_path, branch)
+    pid = _project_id(host, token, project_path)
+    encoded_branch = urllib.parse.quote(branch, safe="")
+    _api_request(host, token, "GET", f"/projects/{pid}/repository/branches/{encoded_branch}")
+    logger.info("Preflight OK — project_id=%s, rama '%s' encontrada.", pid, branch)
+    return pid
+
+
+# ---------------------------------------------------------------------------
+# Commit via API
+# ---------------------------------------------------------------------------
+
+def commit_files(
+    host: str,
+    token: str,
+    project_id: int,
+    branch: str,
+    readme_paths: list[str],
+    commit_message: str,
+    repo_root: str = ".",
+) -> dict:
+    """Commit README files to GitLab using the Commits API.
+
+    Uses the GitLab API instead of git push, which works even when HTTP git
+    access is disabled on the server (only SSH is allowed).
+
+    readme_paths: list of relative paths like ["module_a/README.md", ...]
+    repo_root: local directory where the files are (CI_PROJECT_DIR)
+
+    Returns the commit dict from the GitLab API.
+    """
+    actions = []
+    for rel_path in readme_paths:
+        local_path = os.path.join(repo_root, rel_path)
+        with open(local_path, "r", encoding="utf-8") as fh:
+            content = fh.read()
+
+        action = "update" if _file_exists(host, token, project_id, branch, rel_path) else "create"
+        actions.append({
+            "action": action,
+            "file_path": rel_path,
+            "content": content,
+            "encoding": "text",
+        })
+        logger.debug("%s %s", action, rel_path)
+
+    result = _api_request(
+        host, token, "POST",
+        f"/projects/{project_id}/repository/commits",
+        body={
+            "branch": branch,
+            "commit_message": commit_message,
+            "actions": actions,
+        },
+    )
+    logger.info("Commit creado via API: %s", result.get("short_id", result.get("id")))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Schedule
+# ---------------------------------------------------------------------------
 
 def configure_schedule(
     host: str,
@@ -88,7 +176,6 @@ def configure_schedule(
         )
         return schedule
 
-    # Delete stale schedule(s) if force or duplicate
     for s in existing:
         _api_request(host, token, "DELETE", f"/projects/{pid}/pipeline_schedules/{s['id']}")
         logger.debug("Schedule id=%s eliminado.", s["id"])

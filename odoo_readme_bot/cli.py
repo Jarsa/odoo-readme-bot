@@ -132,23 +132,35 @@ def _cmd_run(args: argparse.Namespace) -> None:  # noqa: C901
     bot_name = os.environ.get("BOT_NAME", "Jarsa Docs Bot")
     bot_email = os.environ.get("BOT_EMAIL", "docs-bot@jarsa.com")
 
-    if gitlab_token and ci_project_path:
-        git_utils.configure_git(bot_name, bot_email, cwd=repo_root)
-        remote_url = (
-            f"https://oauth2:{gitlab_token}@{ci_server_host}/{ci_project_path}.git"
-        )
+    # GitLab API commit: preferred in CI (avoids git push / HTTP-not-allowed issues)
+    use_gitlab_api = bool(gitlab_token and ci_project_path)
+
+    # --- Preflight: verify GitLab credentials BEFORE calling Claude ---
+    gitlab_project_id: int | None = None
+    if use_gitlab_api and not args.dry_run:
+        print(f"Preflight: verificando acceso a {ci_server_host} / {ci_project_path}…")
         try:
-            git_utils.run(["git", "remote", "set-url", "origin", remote_url], cwd=repo_root)
+            gitlab_project_id = gitlab_configurator.preflight(
+                host=ci_server_host,
+                token=gitlab_token,
+                project_path=ci_project_path,
+                branch=branch,
+            )
+            print(f"✓ Acceso verificado — project_id={gitlab_project_id}, rama '{branch}' OK.")
         except RuntimeError as exc:
-            print(f"Error configurando el remoto git: {exc}", file=sys.stderr)
+            print(f"Error de credenciales GitLab: {exc}", file=sys.stderr)
+            print(
+                "Revisa GITLAB_TOKEN (scope 'api') y que CI_PROJECT_PATH sea correcto.",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
     if api_key:
         client = anthropic.Anthropic(api_key=api_key)
-        print("Modo: API key (GitLab CI / producción)")
+        print("Modo Claude: API key (GitLab CI / producción)")
     else:
         client = LocalClaudeClient()
-        print("Modo: claude CLI local (cuenta Claude Code)")
+        print("Modo Claude: claude CLI local (cuenta Claude Code)")
 
     base_prompt = _load_base_prompt()
 
@@ -218,8 +230,39 @@ def _cmd_run(args: argparse.Namespace) -> None:  # noqa: C901
         print("[dry-run] No se realizaron cambios en el repositorio.")
         sys.exit(42)
 
-    if gitlab_token:
+    modules_str = ", ".join(updated)
+    commit_message = (
+        f"docs: auto-update README(s) [skip ci]\n\n"
+        f"Modules: {modules_str}\n"
+        f"Triggered by: {sha_short}"
+    )
+    readme_files = [os.path.join(m, "README.md") for m in updated]
+
+    if use_gitlab_api and gitlab_project_id is not None:
+        # GitLab API commit — works even when HTTP git push is disabled on the server
+        print("\nSubiendo cambios via GitLab API…")
         try:
+            result = gitlab_configurator.commit_files(
+                host=ci_server_host,
+                token=gitlab_token,
+                project_id=gitlab_project_id,
+                branch=branch,
+                readme_paths=readme_files,
+                commit_message=commit_message,
+                repo_root=repo_root,
+            )
+            print(f"✓ Commit creado: {result.get('short_id', result.get('id'))}")
+        except RuntimeError as exc:
+            print(f"Error al hacer commit via API: {exc}", file=sys.stderr)
+            sys.exit(1)
+    elif gitlab_token:
+        # Fallback: git push (requires HTTP git access on the server)
+        git_utils.configure_git(bot_name, bot_email, cwd=repo_root)
+        remote_url = (
+            f"https://oauth2:{gitlab_token}@{ci_server_host}/{ci_project_path}.git"
+        )
+        try:
+            git_utils.run(["git", "remote", "set-url", "origin", remote_url], cwd=repo_root)
             git_utils.commit_and_push(branch, updated, sha_short, cwd=repo_root)
         except RuntimeError as exc:
             print(f"Error al hacer commit/push: {exc}", file=sys.stderr)
