@@ -119,7 +119,13 @@ def _cmd_run(args: argparse.Namespace) -> None:  # noqa: C901
     """Orchestrate the full documentation pipeline."""
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     gitlab_token = os.environ.get("GITLAB_TOKEN")
-    branch = os.environ.get("CI_DEFAULT_BRANCH", "main")
+    # CI_COMMIT_REF_NAME is the actual branch being built (e.g. 17.0).
+    # CI_DEFAULT_BRANCH is the repo's default branch — fallback for local runs.
+    branch = (
+        os.environ.get("CI_COMMIT_REF_NAME")
+        or os.environ.get("CI_DEFAULT_BRANCH")
+        or "main"
+    )
     ci_server_host = os.environ.get("CI_SERVER_HOST", "gitlab.com")
     ci_project_path = os.environ.get("CI_PROJECT_PATH", "")
     repo_root = os.environ.get("CI_PROJECT_DIR", ".")

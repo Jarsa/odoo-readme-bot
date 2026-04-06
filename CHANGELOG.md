@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.2] - 2026-04-06
+
+### Fixed
+
+- `git push` now uses `HEAD:{branch}` to work correctly in GitLab CI's detached
+  HEAD checkout mode (`error: src refspec X does not match any`).
+- Branch is now resolved from `CI_COMMIT_REF_NAME` (actual pipeline branch, e.g.
+  `17.0`) before falling back to `CI_DEFAULT_BRANCH`, fixing pushes to non-default
+  branches.
+
 ## [1.1.1] - 2026-04-04
 
 ### Fixed

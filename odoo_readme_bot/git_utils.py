@@ -121,5 +121,6 @@ def commit_and_push(
         f"Triggered by: {sha_short}"
     )
     run(["git", "commit", "-m", message], cwd=cwd)
-    run(["git", "push", "origin", branch], cwd=cwd)
+    # Use HEAD:{branch} to support detached HEAD (GitLab CI default checkout mode)
+    run(["git", "push", "origin", f"HEAD:{branch}"], cwd=cwd)
     logger.info("Pushed updated READMEs to origin/%s", branch)
