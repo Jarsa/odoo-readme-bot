@@ -253,7 +253,7 @@ def _cmd_run(args: argparse.Namespace) -> None:  # noqa: C901
 
     if args.dry_run:
         print("[dry-run] No se realizaron cambios en el repositorio.")
-        sys.exit(42)
+        sys.exit(0)
 
     modules_str = ", ".join(updated)
     commit_message = (
@@ -295,7 +295,7 @@ def _cmd_run(args: argparse.Namespace) -> None:  # noqa: C901
     else:
         print("GITLAB_TOKEN no configurado — omitiendo commit/push.")
 
-    sys.exit(42)
+    sys.exit(0)
 
 
 def _cmd_install(args: argparse.Namespace) -> None:

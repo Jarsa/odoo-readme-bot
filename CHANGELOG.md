@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.2] - 2026-04-06
+
+### Changed
+
+- `run` command now always exits with code 0 on success, regardless of whether
+  READMEs were updated or not. Exit code 42 has been removed. This eliminates
+  the need for exit-code gymnastics (`; code=$?; [...]`) in `.gitlab-ci.yml`
+  files — a simple `odoo-readme-bot run` is sufficient. Exit code 1 is still
+  used for unrecoverable errors (missing API key, git failure, etc.).
+
 ## [1.2.1] - 2026-04-06
 
 ### Fixed
