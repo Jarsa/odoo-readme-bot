@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.2.0] - 2026-04-06
+
+### Added
+
+- `sync-notebooklm` subcommand: queries installed custom modules from an Odoo
+  instance via `odoo_cloc` webhook, builds a combined bilingual document from
+  all module READMEs (`.md` and `.rst`) across all cloned repos, and uploads it
+  to a Google Doc for use as a NotebookLM source.
+- `odoo_client.py`: public webhook client for `odoo_cloc` — returns installed
+  module names; returns `[]` silently on any error.
+- `docs_sync.py`: Google Docs API integration using a service account —
+  `build_service`, `clear_and_update_doc`, `build_combined_document`.
+- New env vars for `sync-notebooklm`: `ODOO_URL`, `GOOGLE_SA_CREDENTIALS`,
+  `GOOGLE_DOCS_ID`, `CUSTOMER`, `REPOS_ROOT`.
+- Falls back to local repo modules when `odoo_cloc` webhook is unavailable.
+- New dependencies: `google-api-python-client>=2.100.0`, `google-auth>=2.23.0`,
+  `requests>=2.28.0`.
+
 ## [1.1.5] - 2026-04-06
 
 ### Added
